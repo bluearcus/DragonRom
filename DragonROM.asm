@@ -578,6 +578,7 @@ L8371   JSR     >L90A5			; send CR to screen
 
 BasCmdMode2:        
 L837A   JSR     >LB5C6			; get a line of input (from console)
+BasCmdAfterInput
         LDU     #$FFFF                  ; Set current line  to -1, to flag command mode
         STU     <BasCurrentLine
         BCS     BasCmdMode2		; loop again if terminated by break
@@ -4343,8 +4344,251 @@ L995E   COM     <FP0SGN			; toggle sign of FPA0 mantissa
         BSR     L995B			; convert FPA0 to integer
         JMP     >ChangeFPA0Sign		; toggle sign of FPA0
 
-; basic EDIT command
+; basic EDIT command (legacy vs screen editor front-end)
 CmdEdit:
+	ifdef	ROM_SCREEN_EDITOR
+L9965   JSR     >L9D9F			; get line number from basic
+        LEAS    2,S			; drop return address
+        LDX     <BasCurrentLine		; direct mode is $FFFF
+        LEAX    1,X                     ; check if we have that
+        LBNE    BasIDError              ; EDIT only usable in direct mode - throw error
+        JSR     >BasFindLineNo 		; find requested line
+        LBCS    BasULError		; line not found - throw error
+        STX     <BasListLine		; save source line pointer
+        JSR     >TextCls 		; start from a known screen layout
+
+        LDD     BasTempLine		; List EDIT source line starting at top of screen
+        JSR     >TextOutNum16           ; Output line number
+        JSR     >TextOutSpace           ; and a space
+        LDX     <TextVDUCursAddr        ; grab the cursor position and 
+        STX     <ScrEdBrowseCrsPos	; save it (browse cursor at first statement char on row 0)
+        LDX     <BasListLine		; uncrunch and display statement text
+        JSR     >L8F08
+        LDX     #BasLinInpBuff+1        ; work through
+ScrEdListLoop
+        LDA     ,X+                     ; de-tokenised line
+        BEQ     ScrEdPrompt             ; exiting at NULL
+        JSR     >TextOutChar            ; outputting the characters
+        BRA     ScrEdListLoop           ; while we haven't exit
+
+ScrEdPrompt
+        JSR     >TextOutCRLF 		; editable input starts on next row
+        CLR     <TextLastKey
+        LDX     #TextScreenBase		; copy line number + space from listed line (row 0)
+        LDU     #BasLinInpBuff+1        ; setup the line input buffer
+        CLRB				; seeded char count (line no + space)
+ScrEdSeedLoop
+        LDA     B,X			; read from screen at TextScreenBase+B       
+        ANDA    #$BF			; convert screen code back to ASCII
+        STA     ,U+			; write to input buffer and advance U
+        JSR     >TextOutChar            ; and print to prompt updating the edit cursor position
+        INCB				; B = number of seeded chars so far
+        CMPA    #' '
+        BNE     ScrEdSeedLoop           ; stop when we have copied the space after the line number
+        COM     <ScrEdFlag		; editor should be inactive on EDIT entry
+        TFR     U,X			; X = end of seeded text
+        INCB				; B = chars+1 for LB5D0 line-input logic
+        JSR     >LB5D0			; get edited line via standard input loop
+        JMP     >BasCmdAfterInput	; handle it exactly like a typed line
+
+ScrEdHandler
+        STA     <SndPitch               ; preserve A (last cycle's keypress, usually, as some hooks are naughty)
+        JSR     VectInChar 		; preserve existing vector hook
+        TST     <TextDevN		; screen editor only runs on console input
+        BNE     ScrEdResume             ; drop back to standard line input handling
+        TST     <ScrEdFlag              ; is the Screen editor browse mode active?
+        BEQ     ScrEdNotActive	        ; not in editor: only Right Arrow (TAB) is checked
+        BRA     ScrEdMain               ; otherwise go the the browse mode main loop
+ScrEdNotActive
+        PSHS    A                       ; Preserve any hook modification to A
+        LDA     <SndPitch               ; Get the guaranteed unsmashed oldkey value
+        CMPA    #$09			; Right Arrow (TAB) enters browse mode during line input
+        PULS    A                       ; Get A back
+        BEQ     ScrEdActivate           ; And turn on browse mode if we found a Right arrow (TAB) key
+ScrEdResume
+        JMP     TextWaitKeyCurs2aCont	; Otherwise: head back to normal handler
+
+ScrEdActivate
+        LDU     <TextVDUCursAddr        ; Copy the current edit cursor position
+        STU     <ScrEdBrowseCrsPos      ; to the browse cursor pos
+        COM     <ScrEdFlag		; and toggle editor browse mode on
+
+ScrEdMain
+        PSHS    B,X,Y			; preserve caller state
+ScrEdLoop
+        CLR     <CasEOFFlag		; keep line-input EOF flag clear
+        BSR     ScrEdInvert
+ScrEdWaitKey
+        JSR     >BasicKbdIn 		; wait for a keypress
+        BNE     ScrEdKeyIn
+; browse mode TextVDUCurs flasher
+        DEC     <ScrEdBrowseCursFlashLow
+        BPL     SkipCursProcessing
+        LDB     #28
+        STB     <ScrEdBrowseCursFlashLow
+        INC     <ScrEdBrowseCursFlashHigh
+        BPL     WriteCurs      
+        LDB     #47
+WriteCurs        
+        STB     [TextVDUCursAddr]
+
+SkipCursProcessing
+        CLR     <ScrEdRepeat		; no key: reset repeat counter
+        BRA     ScrEdWaitKey
+ScrEdKeyIn
+        LDX     #TextKbdRollover	; clear rollover/debounce so held keys repeat
+        LDB     #$FF
+ScrEdClrRoll
+        STB     ,X+
+        CMPX    #BasJoyVal0             ; first byte past end of rollover table
+        BNE     ScrEdClrRoll            ; keep rolling rolling rolling
+        LDX     #$2000			; repeat delay (reuse ROM keyboard delay loop)
+        JSR     >LBBC8                  ; std ROM keyboard delay loop
+        INC     <ScrEdRepeat		; bump repeat counter for this held key
+        LDB     <ScrEdRepeat            ; key repeat counter starts at 1
+        ANDB    #$FE			; flatten odds onto evens
+        BEQ     ScrEdKeyAct		; accept new key imediately
+        CMPB    #$06			; otherwise until counter reaches 6, suppress repeats
+        BCS     ScrEdWaitKey		; small counter: keep waiting (no action)
+ScrEdKeyAct
+        LDB     #$60                    ; Blank VDU Char
+        STB     [TextVDUCursAddr]       ; Clear chatchar at browse mode cursor pos
+
+        BSR     ScrEdInvert	        ; restore browse character before handling key
+        LDU     #ScrEdKeyTable
+        TFR     U,Y                     ; keep a copy of the key table as our dispatch offset base
+ScrEdFindKey
+        CMPA    ,Y+                     ; do we match the keycode
+        BEQ     ScrEdDispatch           ; yes, dispatch to handler
+        TST     ,Y                      ; no, check handler offset
+        BPL     ScrEdFindKey            ; Keys are positive signed values, negative is end of keys and first offset
+
+        TSTA				; now check key code directly, only plain ASCII ' '.. are typeable
+        BMI     ScrEdLoop		; graphics: ignore
+        CMPA    #' '			; below space?
+        BCS     ScrEdLoop		; yes: ignore (control key)
+        FCB     $81			; SKIP1 over DECA for fallthrough
+ScrEdUpArrow                            ; Skipped path which sets key to Up Arrow from Shifted version
+        DECA                            ; so we have a way to type up arrow instead of move up
+        
+ScrEdDisplay
+        LDX     <TextVDUCursAddr        ; going to display a normal keyed character so get cursor pos
+        CMPX    #TextScreenLast         ; are we about to scroll
+        BNE     ScrEdDisplayExit        ; no, just exit leaving the key in A for the main input loop        
+        CLR     <ScrEdFlag		; prevent hook re-entry during scroll
+        JSR     >BasicScreenOut         ; do the output ourselves, including scroll
+        COM     <ScrEdFlag              ; reset the browse mode flag
+        LEAX    -31,X                   ; adjust edit cursor to start of bottom line
+        STX     <TextVDUCursAddr        ; and save it
+        LDX     <ScrEdBrowseCrsPos      ; check the old browse cursor position
+        CMPX    #TextScreenBase+32	; were we on the top line and copying something that's scrolled away
+        BCS     ScrEdLoop               ; if we were then hard cheese, leave browse cursor where it was
+        LEAX    -32,X                   ; otherwise, adjust it to follow the content it was copying
+        STX     <ScrEdBrowseCrsPos      ; and save it back
+IndScrEdLoop
+        BRA     ScrEdLoop               ; now go back to the browse mode main loop. Also trampoline
+ScrEdDisplayExit
+        PULS    B,X,Y,PC                ; return (for the moment) to the main input loop with a key to print
+
+ScrEdDispatch
+        LDB     10,Y                    ; grab corresponding dispatch offset for matched key 
+        JMP     B,U                     ; dispatch to handler
+
+ScrEdInvert
+        LDX     <ScrEdBrowseCrsPos      ; set the browse cursor highlight by inverting the character
+        LDB     ,X
+        EORB    #$40
+        STB     ,X
+        RTS
+
+ScrEdUp
+        LEAX    -64,X                   ; Fallthrough arithmetic for cursor movement
+ScrEdDown
+        LEAX    31,X
+ScrEdRight
+        LEAX    2,X
+ScrEdLeft
+        LEAX    -1,X
+ScrEdMove
+        CMPX    #TextScreenBase         ; check start of screen
+        BCS     IndScrEdLoop               ; if before it, discard
+        CMPX    #TextScreenLast         ; check end of screen
+        BHI    IndScrEdLoop               ; if after it, discard
+        CMPX    <TextVDUCursAddr        ; check line entry cursor
+        BHI     ScrEdHome               ; if after it, set browse cursor position back to it
+        STX     <ScrEdBrowseCrsPos      ; save updated browse cursor position
+        BRA     IndScrEdLoop
+
+ScrEdKeyTable
+        FCB     $5E                     ; Up
+        FCB     $0A                     ; Down
+        FCB     $08                     ; Left
+        FCB     $09                     ; Right
+        FCB     $5D                     ; Copy (SHIFT+Right)
+        FCB     $15                     ; Backspace (SHIFT+Left)
+        FCB     $5B                     ; Home (SHIFT+Down)
+        FCB     $0C                     ; Exit Browse (Clear)
+        FCB     $03                     ; Abort line (Break)
+        FCB     $0D                     ; Enter
+        FCB     $5F                     ; UpArrow (SHIFT+Up, printable)
+ScrEdOffTable
+        FCB     ScrEdUp-ScrEdKeyTable
+        FCB     ScrEdDown-ScrEdKeyTable
+        FCB     ScrEdLeft-ScrEdKeyTable
+        FCB     ScrEdRight-ScrEdKeyTable
+        FCB     ScrEdCopy-ScrEdKeyTable
+        FCB     ScrEdBacksp-ScrEdKeyTable
+        FCB     ScrEdHome-ScrEdKeyTable
+        FCB     ScrEdClsExit-ScrEdKeyTable
+        FCB     ScrEdFinish-ScrEdKeyTable
+        FCB     ScrEdEnter-ScrEdKeyTable
+        FCB     ScrEdUpArrow-ScrEdKeyTable
+
+ScrEdCopy
+        LDB     ,S			; B from LB5D0: chars+1 in buffer
+        CMPB    #LineBufMax		; buffer full?
+        BCC     IndScrEdLoop		; yes: ignore COPY, stay in editor
+        LDA     ,X+                     ; get source screen character
+        CMPX    #TextScreenLast+1       ; check if we've just grabbed the last char
+        BHS     ScrEdCopyConv           ; if we have, we can't save incremented X, it's offscreen
+        STX     <ScrEdBrowseCrsPos      ; save the updated browse position
+ScrEdCopyConv
+        CMPA    #$20
+        BCC     ScrEdCopyHi
+        ADDA    #$60
+IndScrEdDisplay        
+        BRA     ScrEdDisplay
+ScrEdCopyHi
+        CMPA    #$60
+        BCS     IndScrEdDisplay
+        SUBA    #$40
+        BRA     IndScrEdDisplay
+ScrEdBacksp
+        LDB     ,S			; saved B from immediate loop: chars+1 in buffer
+        CMPB    #$01			; at absolute start of input buffer?
+        BEQ     IndScrEdLoop		; yes: ignore backspace in browse, stay in editor
+        LDA     #$08                    ; A ASCII $08
+        PULS    B,X,Y,PC
+ScrEdHome
+        LDX     <TextVDUCursAddr
+        BRA     ScrEdMove
+
+ScrEdClsExit
+        CLRA				; swallow CLS key
+ScrEdEnter
+ScrEdFinish
+ScrEdExit
+        CLR     <ScrEdFlag
+        PSHS    A
+        JSR     >BasicKbdIn		; resync rollover so exit key isn't re-detected
+        PULS    A,B,X,Y,PC
+
+	ifdef	Dragon64ram
+        FILL    $00,$DAD9-*
+	else
+        FILL    $00,$9AD9-*
+	endc
+	else
 L9965   JSR     >L9D9F			; get line number from basic
         LEAS    2,S			; drop return address
 L996A   LDA     #$01			; list flag 
@@ -4375,7 +4619,7 @@ L998F   JSR     >L9AB9			; get keystroke
         MUL
         ADDB    ,S+			; add new digit
         BRA     L998F			; loop again
-
+	
 ; key typed is not a digit, B contains a repeat count for the following command
 L99A2   SUBB    #$01			; number of repeats param in B
         ADCB    #$01			; if it is 0 then make it 1
@@ -4384,7 +4628,7 @@ L99A2   SUBB    #$01			; number of repeats param in B
         BNE     L99AF			; nope
         JSR     >TextOutCRLF 		; yes print a return
         BRA     L996A			; output line and start editing again
-
+	
 L99AF   CMPA    #'L'			; 'L' List?
         BNE     L99BE			; no.....
 	
@@ -4392,7 +4636,7 @@ L99B3   BSR     L99E6			; List the line
         CLR     <EvalD8			; reset list flag to no list			
         JSR     >TextOutCRLF 		; output a return
         BRA     L997F			; loop again for another edit command	
-
+	
 L99BC   LEAS    2,S			; purge return address
 L99BE   CMPA    #$0D			; enter key pressed ?
         BNE     L99CF			; nope
@@ -4402,7 +4646,7 @@ L99C4   JSR     >TextOutCRLF 		; output a return
         LDX     #BasLinInpBuff+1	; point to line in buffer
         STX     <BasAddrSigByte		; reset basic input pointer
         JMP     >L83A6			; go put the line back in program
-
+	
 L99CF   CMPA    #'E'			; 'E' same as enter except no echo	
         BEQ     L99C4
 	
@@ -4410,24 +4654,23 @@ L99CF   CMPA    #'E'			; 'E' same as enter except no echo
         BNE     L99DD			; nope, skip
         JSR     >TextOutCRLF 		; output a return
         JMP     >BasCmdMode 		; go back to basic interpreter, don't re-insert line
-
+	
 L99DD   BSR     L99E1			; interpret remaining commands as subroutines
         BRA     L998E			; loop again for another edit command	
-
+	
 L99E1   CMPA    #' '			; space pressed?
         BNE     L99F5			; nope, skip
-
+	
         FCB     Skip2			; skip 2 bytes
-
+	
 L99E6   LDB     #$F9			; max bytes in line buffer
-L99E8   LDA     ,X			; get a character from buffer
+L99E8   LDA     ,X+			; get a character from buffer, advance
         BEQ     L99F4			; end of line ?, yep exit
         JSR     >TextOutChar 		; output the character
-        LEAX    1,X			; increment buffer pointer
         DECB				; decrement character counter (entered above)
         BNE     L99E8			; all done, if not loop again
 L99F4   RTS				; return, do another command
-
+	
 L99F5   CMPA    #'D'			; delete command
         BNE     L9A41			; nope, skip
 	
@@ -4437,7 +4680,7 @@ L99F9   TST     ,X			; check for end of line
         DECB				; decrement counter
         BNE     L99F9			; loop again if more
         RTS				; return, do another command
-
+	
 ;remove one character from edit buffer
 L9A03   DEC     <BasEditorLineLen	; decrement line length
         LEAY    -1,X			; point at previous character, compensate for LEAY 1,Y below	
@@ -4446,7 +4689,7 @@ L9A07   LEAY    1,Y			; move to next character
         STA     ,Y			; save in current character position, move it back one
         BNE     L9A07			; not end of line, keep going
         RTS				; return, do another command
-
+	
 L9A10   CMPA    #'I'			; insert?
         BEQ     L9A27			; yes : do it
 	
@@ -4463,7 +4706,7 @@ L9A10   CMPA    #'I'			; insert?
         STB     <BasEditorLineLen	; set line length
 L9A25   BSR     L99E6			; display line on screen
 L9A27   JSR     >L9AB9			; get a keystroke
-
+	
         CMPA    #$0D			; return?
         BEQ     L99BC			; yes, interpret another command print line
 	
@@ -4472,7 +4715,7 @@ L9A27   JSR     >L9AB9			; get a keystroke
  
         CMPA    #$08			; backspace
         BNE     L9A58			; no, skip
-
+	
 ; handle backspace	
         CMPX    #BasLinInpBuff+1	; at beginning of buffer
         BEQ     L9A27			; yes: can't delete anymore
@@ -4480,7 +4723,7 @@ L9A27   JSR     >L9AB9			; get a keystroke
         BSR     L9A82			; move pointer back, BS on the screen
         BSR     L9A03			; delete character from buffer
         BRA     L9A27			; go back and get next insert subcommand
-
+	
 L9A41   CMPA    #'C'			; change?
         BNE     L9A10			; no
 	
@@ -4489,18 +4732,18 @@ L9A45   TST     ,X			; check current buffer character
         JSR     >L9AB9			; get a keystroke
         BCS     L9A50			; ; ligitimate key skip on
         BRA     L9A45			; key invalid, try again
-
+	
 L9A50   STA     ,X+			; save character in line (replacing current one)
         BSR     L9A8B			; send new character to screen
         DECB				; decrement character counter 
         BNE     L9A45			; loop again if more
 L9A57   RTS				; return, do another command
-
+	
 L9A58   LDB     <BasEditorLineLen	; get length of line	
         CMPB    #$F9			; bigger than max length ?	
         BNE     L9A60			; no, skip on
         BRA     L9A27			; ignore input if at maximul length
-
+	
 ; Insert a character in line, by moving everything from current
 ; character up one byte to make room.
 L9A60   PSHS    X			; save current buffer pointer
@@ -4517,26 +4760,26 @@ L9A66   LDB     ,-X			; decrement current line pointer and get a character
         BSR     L9A8B			; send character to console
         INC     <BasEditorLineLen	; increment saved line length
         BRA     L9A27			; get another insert sub command
-
+	
 L9A78   CMPA    #$08			; backspace?
         BNE     L9A8E			; nope, skip
 L9A7C   BSR     L9A82			; move pointer back, send BS to screen
         DECB				; decrement line length
         BNE     L9A7C			; not at beginning of line, loop again
         RTS				
-
+	
 L9A82   CMPX    #BasLinInpBuff+1	; compare pointer to start of buffer
         BEQ     L9A57			; at beginning, can't backspace further, exit
         LEAX    -1,X			; move pointer back one
         LDA     #$08			; display a backspace on screen
 L9A8B   JMP     >TextOutChar
-
+	
 L9A8E   CMPA    #'K'			; Kill?
         BEQ     L9A97			; yes
         SUBA    #'S'			; search?
         BEQ     L9A97			; yes
         RTS
-
+	
 L9A97   PSHS    A			; save search / kill flag on stack			
         BSR     L9AB9			; get a keystroke, target character
         PSHS    A			; save it on stack
@@ -4548,7 +4791,7 @@ L9A9D   LDA     ,X			; get current buffer character
         BSR     L9A8B			; send character to console out	
         LEAX    1,X			; move to next char in buffer
         BRA     L9AAE			; check next input character
-
+	
 L9AAB   JSR     >L9A03			; remove one character from buffer
 L9AAE   LDA     ,X			; get current input character
         CMPA    ,S			; same as searched for?
@@ -4556,7 +4799,7 @@ L9AAE   LDA     ,X			; get current input character
         DECB				; decement count
         BNE     L9A9D			; loop again if not zero
 L9AB7   PULS    Y,PC			; restore and return, pull Y will clean the stack
-
+	
 ; get a keystroke, used by edit command
 L9AB9   JSR     >TextWaitKeyCurs2 	; wait for keypress with cursor	
         CMPA    #$7F			; graphic character?
@@ -4580,6 +4823,7 @@ L9AC6   CMPA    #$0D			; enter?
 	
         ORCC    #FlagCarry		; set carry
 L9AD8   RTS
+	endc
 
 ; Basic TRON
 CmdTron:
@@ -9284,7 +9528,12 @@ LB505   BSR     TextWaitKeyCurs2a	; get a character from console
 
 ;LB50A
 TextWaitKeyCurs2a   
+	ifdef	ROM_SCREEN_EDITOR
+        JMP     >ScrEdHandler
+TextWaitKeyCurs2aCont
+	else
         JSR     VectInChar 		; Check char in vector
+	endc
         CLR     <CasEOFFlag             ; flag not eof
         TST     <TextDevN               ; check device no
         BEQ     LB538                   ; zero : scan keyboard

@@ -7,8 +7,10 @@
 AS=lwasm
 ASFILES=DragonROM.asm 
 ASFLAGS=-9 -r -I defs
+ASFLAGS_SCREEN=$(ASFLAGS) -DROM_SCREEN_EDITOR
 
-all: d32 d64_1 d64_2 
+all: d32 d64_1 d64_2 screen
+screen: screen32 screen64_1 screen64_2
 #d32_test
 
 d32:	DragonROM.asm
@@ -21,9 +23,21 @@ d64_1:	DragonROM.asm
 d64_2:	DragonROM.asm
 	$(AS) $(ASFLAGS) -DDragon64 -DDragon64ram -oroms/dragon64_2.rom -llist/d64_2.lst DragonROM.asm
 
+screen32:	DragonROM.asm
+	$(AS) $(ASFLAGS_SCREEN) -oroms/dragon32_screen.rom -llist/d32_screen.lst DragonROM.asm
+
+screen64_1:	DragonROM.asm
+	$(AS) $(ASFLAGS_SCREEN) -DDragon64 -oroms/dragon64_1_screen.rom -llist/d64_1_screen.lst DragonROM.asm
+
+screen64_2:	DragonROM.asm
+	$(AS) $(ASFLAGS_SCREEN) -DDragon64 -DDragon64ram -oroms/dragon64_2_screen.rom -llist/d64_2_screen.lst DragonROM.asm
+
+install32screen:
+	@cmd.exe /C copy /Y "C:\Users\44798\Sync\Projects\DragonASM\DragonROMScreenEdit\Git branches\DragonRom\roms\dragon32_screen.rom" "C:\Users\44798\Documents\xroar\dragon32_screen.rom"
+
 clean:
-	rm roms/*.rom
-	rm list/*.lst
+	rm -f roms/*.rom
+	rm -f list/*.lst
 	
 check:
 	cmp -l roms/dragon32.rom ../ROMS/d32.rom

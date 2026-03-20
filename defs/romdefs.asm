@@ -138,8 +138,13 @@ GrCircleYCo		EQU	$00CD		Circle command Y
 BasRenumVal		EQU	$00CF		Renum increment value
 GrCircleRadius		EQU	$00D0		Circle radius
 BasRenumStart		EQU	$00D1		Renum start line no
+ScrEdBrowseCrsPos	EQU	BasRenumStart	Screen editor: browse cursor
 BasCloadMOffs		EQU	$00D3		2s complement of CLOADM offset
 BasRenumStartLine	EQU	$00D5		Renum start line number
+ScrEdRepeat		EQU	BasRenumStartLine	Screen editor repeat counter
+; Browse-mode VDU cursor flash (16-bit tick); reuse BasRenumVal/GrCircleRadius only in browse
+ScrEdBrowseCursFlashLow	EQU	BasRenumVal
+ScrEdBrowseCursFlashHigh	EQU	GrCircleRadius
 BasEditorLineLen	EQU	$00D7		Editor line length
 GrDirtyFlag		EQU	$00DB		Flag to tell if graphics screen has changed
 SndOctave		EQU	$00DE		Sound octave value for PLAY
@@ -163,6 +168,7 @@ Checksum64		EQU	$011B		Dragon 64 RAM copy of ROM checksum
 KbdLSTKEY		EQU	$011D		Dragon 64, keyboard last key
 KbdCNTDWN		EQU	$011E		Dragon 64, keybord repeat countdown
 KbdREPDLY		EQU	$011F		Dragon 64, keybord repeat delay
+ScrEdFlag		EQU	BasRenumStartLine+1	Screen editor active flag (reuses RENUM start line hi byte)
 BasNumCmds		EQU	$0120		Number of basic commands
 BasStub0		EQU	$0120		Basic Stub 0 (All basic on Dragon, Colour basic on Tandy)
 BasAddrCmdList		EQU	$0121		Address of basic command list
