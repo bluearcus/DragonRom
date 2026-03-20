@@ -66,7 +66,7 @@ These keys affect the input line:
 - You cannot move past the current input cursor position
 - If the screen scrolls, the editor keeps your browse cursor position consistent with any line you are copying, if it is still onscreen
 - All standard keys and movement keys autorepeat in browse mode.
-- Some characters normally accessible from the arrow key group can not be accessed in browse mode. You can use `SHIFT` and `UP ARROW` type the caret symbol without needing to leave browse mode, or temporarily exit browse mode using `CLEAR`, returning with `RIGHT` as necessary.
+- Some characters normally accessible from the arrow key group can not be accessed in browse mode. You can use `SHIFT` and `UP ARROW` to type the caret symbol without needing to leave browse mode, or temporarily exit browse mode using `CLEAR`, returning with `RIGHT` as necessary.
 
 ------------------------------------------------------------------------
 
