@@ -66,16 +66,15 @@ These keys affect the input line:
 - You cannot move past the current input cursor position
 - If the screen scrolls, the editor keeps your browse cursor position consistent with any line you are copying, if it is still onscreen
 - All standard keys and movement keys autorepeat in browse mode.
-- Some characters normally accessible from the arrow key group can not be accessed in browse mode. You can use `SHIFT` and `UP ARROW` to type the caret symbol without needing to leave browse mode, or temporarily exit browse mode using `CLEAR`, returning with `RIGHT` as necessary.
+- Some characters normally accessible from the arrow key group can not be accessed in browse mode. You can use `SHIFT` and `UP ARROW` to type the caret (up arrow) symbol without needing to leave browse mode, or temporarily exit browse mode using `CLEAR`, returning with `RIGHT` as necessary for other characters.
 
 ------------------------------------------------------------------------
 
 ## The `EDIT` Command
 
-The `EDIT` command simply uses the screen editor to modify an existing
+The `EDIT` command uses the screen editor browse mode to modify an existing
 BASIC line.\
-It replaces the older line editor with the same screen-based editing
-method.
+It replaces the old line editor with the far simpler and more effective screen-based editing method already described.
 
 ------------------------------------------------------------------------
 
@@ -109,4 +108,4 @@ You can then: - Type normally, or\
 ### Restrictions
 
 - `EDIT` only works in **direct mode**\
-- Otherwise: `?ID` (Illegal Direct)
+- Otherwise: an `?ID` error (Illegal Direct) is generated
