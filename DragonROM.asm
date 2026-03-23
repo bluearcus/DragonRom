@@ -4421,14 +4421,14 @@ ScrEdLoop
 ScrEdWaitKey
         JSR     >BasicKbdIn 		; wait for a keypress
         BNE     ScrEdKeyIn
-; browse mode TextVDUCurs flasher
-        DEC     <ScrEdBrowseCursFlashLow
+; browse mode TextVDUCurs flasher (prescaler sign toggles state; LDB #28 reload doubles cursor character for one phase)
+        DEC     <ScrEdBrowseCursFlashPrescaler
         BPL     SkipCursProcessing
-        LDB     #28
-        STB     <ScrEdBrowseCursFlashLow
-        INC     <ScrEdBrowseCursFlashHigh
+        LDB     #$20                    ; Inverse space, and pre-scaler delay reset
+        STB     <ScrEdBrowseCursFlashPrescaler
+        INC     <ScrEdBrowseCursFlashPhase
         BPL     WriteCurs      
-        LDB     #47
+        LDB     #$8D                    ; Green semigraphics bottom left quadrant blacked
 WriteCurs        
         STB     [TextVDUCursAddr]
 
@@ -4485,7 +4485,7 @@ ScrEdDisplay
         BCS     ScrEdLoop               ; if we were then hard cheese, leave browse cursor where it was
         LEAX    -32,X                   ; otherwise, adjust it to follow the content it was copying
         STX     <ScrEdBrowseCrsPos      ; and save it back
-IndScrEdLoop
+IndScrEdLoop                            ; Indirection label so we can avoid later LBRx forms
         BRA     ScrEdLoop               ; now go back to the browse mode main loop. Also trampoline
 ScrEdDisplayExit
         PULS    B,X,Y,PC                ; return (for the moment) to the main input loop with a key to print
@@ -4531,6 +4531,8 @@ ScrEdKeyTable
         FCB     $03                     ; Abort line (Break)
         FCB     $0D                     ; Enter
         FCB     $5F                     ; UpArrow (SHIFT+Up, printable)
+
+; Offset table for dispatches. First entry must be for a routine prior to ScrEdKeyTable to flag end of key table
 ScrEdOffTable
         FCB     ScrEdUp-ScrEdKeyTable
         FCB     ScrEdDown-ScrEdKeyTable
@@ -4552,7 +4554,9 @@ ScrEdCopy
         CMPX    #TextScreenLast+1       ; check if we've just grabbed the last char
         BHS     ScrEdCopyConv           ; if we have, we can't save incremented X, it's offscreen
         STX     <ScrEdBrowseCrsPos      ; save the updated browse position
-ScrEdCopyConv
+
+; revert the VDG character code to ascii to print it and store it in the linebuffer
+ScrEdCopyConv                           
         CMPA    #$20
         BCC     ScrEdCopyHi
         ADDA    #$60
@@ -4570,8 +4574,8 @@ ScrEdBacksp
         LDA     #$08                    ; A ASCII $08
         PULS    B,X,Y,PC
 ScrEdHome
-        LDX     <TextVDUCursAddr
-        BRA     ScrEdMove
+        LDX     <TextVDUCursAddr        ; Reset browse cursor position to standard line input cursor pos
+        BRA     ScrEdMove               ; check bounds and carry on
 
 ScrEdClsExit
         CLRA				; swallow CLS key

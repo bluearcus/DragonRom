@@ -142,9 +142,9 @@ ScrEdBrowseCrsPos	EQU	BasRenumStart	Screen editor: browse cursor
 BasCloadMOffs		EQU	$00D3		2s complement of CLOADM offset
 BasRenumStartLine	EQU	$00D5		Renum start line number
 ScrEdRepeat		EQU	BasRenumStartLine	Screen editor repeat counter
-; Browse-mode VDU cursor flash (16-bit tick); reuse BasRenumVal/GrCircleRadius only in browse
-ScrEdBrowseCursFlashLow	EQU	BasRenumVal
-ScrEdBrowseCursFlashHigh	EQU	GrCircleRadius
+; Browse-mode VDU cursor flash: prescaler (BasRenumVal) + phase (GrCircleRadius); browse-only reuse
+ScrEdBrowseCursFlashPrescaler	EQU	BasRenumVal
+ScrEdBrowseCursFlashPhase	EQU	GrCircleRadius
 BasEditorLineLen	EQU	$00D7		Editor line length
 GrDirtyFlag		EQU	$00DB		Flag to tell if graphics screen has changed
 SndOctave		EQU	$00DE		Sound octave value for PLAY
