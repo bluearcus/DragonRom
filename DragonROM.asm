@@ -38,6 +38,17 @@
 
 ; 
 
+; 2026-03-23, Mike Miller
+;       Integrated and improved screen editor and replacement of EDIT command
+;       Code derived from original work by Rob Strange (published Your Computer magazine, July 1984), with additions by Gary Moulton (2024)
+;       Define ROM_SCREEN_EDITOR to enable, Dragon 32 and 64 compatible
+
+; 
+
+; 2026-03-24, Mike Miller
+;       Fix standard ROM 'dropped keys' rollover problem
+;       Define ROM__KBD_ROLLOVER_FIX to enable, fix is applied to Dragon 32 and standard mode 64 ROMs
+; 
 
         ifdef	Dragon64ram
 	ORG	$C000				; Dragon 64 ram mode
@@ -10928,18 +10939,19 @@ LBBEC   LEAS    -2,S			; Make room on stack
         CLR     PIA0DB			; Force all columns low
         LDB     PIA0DA			; Check for any key down 
         ORB     #$80			; Mask out joystick comparitor input
+
 	ifdef	ROM_KBD_ROLLOVER_FIX
 	ifndef	Dragon64ram
-; Rollover fix (D32 / D64 ROM): stock code exits without updating the rollover
+; Rollover fix (D32 / D64 ROM mode): stock code exits without updating the rollover
 ; table when a second PIA read (all columns high) isn't $FF, leaving the table
 ; stale and causing lost/stuck keys.  Fix checks for any key down first, then
 ; resyncs the table on idle-state changes.  NOP fill preserves ROM geometry.
         CMPB    #$FF			; Any key down at all?
         BNE     LBC08			; Yes - proceed to full column scan
-        CMPB    ,X			; No key down - has idle state changed from saved?
-        BEQ     LBC6F			; Same as saved - nothing happening, exit
+        CMPB    ,X			; No key down - was it idle last time through
+        BEQ     LBC6F			; Same as before - nothing happening, exit
         FILL    $12,7			; NOP fill to preserve ROM geometry
-LBC08   STB     ,X+			; Save master byte in rollover table
+LBC08   STB     ,X+			; Save new master byte in rollover table
 	else
 ; Dragon64ram: stock handling (IRQ-based rollover reset at D64IRQ/LBF32)
         CMPB    ,X			; Any row changed from last scan ?
@@ -10952,7 +10964,8 @@ LBC08   STB     ,X+			; Save master byte in rollover table
         STA     ,X+			; Put keyrown in rollover table
 	endc
 	else
-; Stock rollover handling
+
+; Stock master byte check handling
         CMPB    ,X			; Any row changed from last scan ?
         BEQ     LBC6F			; No : restore and return
 	
@@ -10965,6 +10978,8 @@ LBC08   STB     ,X+			; Save master byte in rollover table
 	
         STA     ,X+			; Put keyrown in rollover table
 	endc
+
+; Refresh rollover table
         CLR     ,S			; Zero column count
         LDB     #$FE			; Start scanning first column
         STB     PIA0DB			; Output column
