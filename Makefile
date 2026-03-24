@@ -9,10 +9,12 @@ ASFILES=DragonROM.asm
 ASFLAGS=-9 -r -I defs
 ASFLAGS_SCREEN=$(ASFLAGS) -DROM_SCREEN_EDITOR
 ASFLAGS_KBDFIX=$(ASFLAGS) -DROM_KBD_ROLLOVER_FIX
+ASFLAGS_SCREEN_KBDFIX=$(ASFLAGS_SCREEN) -DROM_KBD_ROLLOVER_FIX
 
-all: d32 d64_1 d64_2 screen kbdfix
+all: d32 d64_1 d64_2 screen kbdfix screenkbdfix
 screen: screen32 screen64_1 screen64_2
 kbdfix: kbdfix32 kbdfix64_1
+screenkbdfix: screenkbdfix32 screenkbdfix64_1
 
 #d32_test
 
@@ -42,6 +44,12 @@ kbdfix32:	DragonROM.asm
 
 kbdfix64_1:	DragonROM.asm
 	$(AS) $(ASFLAGS_KBDFIX) -DDragon64 -oroms/dragon64_1_kbdfix.rom -llist/d64_1_kbdfix.lst DragonROM.asm
+
+screenkbdfix32:	DragonROM.asm
+	$(AS) $(ASFLAGS_SCREEN_KBDFIX) -oroms/dragon32_screen_kbdfix.rom -llist/d32_screen_kbdfix.lst DragonROM.asm
+
+screenkbdfix64_1:	DragonROM.asm
+	$(AS) $(ASFLAGS_SCREEN_KBDFIX) -DDragon64 -oroms/dragon64_1_screen_kbdfix.rom -llist/d64_1_screen_kbdfix.lst DragonROM.asm
 
 clean:
 	rm -f roms/*.rom
