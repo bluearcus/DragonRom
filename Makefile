@@ -7,8 +7,10 @@
 AS=lwasm
 ASFILES=DragonROM.asm 
 ASFLAGS=-9 -r -I defs
+ASFLAGS_KBDFIX=$(ASFLAGS) -DROM_KBD_ROLLOVER_FIX
 
-all: d32 d64_1 d64_2 
+all: d32 d64_1 d64_2
+kbdfix: kbdfix32 kbdfix64_1
 #d32_test
 
 d32:	DragonROM.asm
@@ -20,6 +22,12 @@ d64_1:	DragonROM.asm
 
 d64_2:	DragonROM.asm
 	$(AS) $(ASFLAGS) -DDragon64 -DDragon64ram -oroms/dragon64_2.rom -llist/d64_2.lst DragonROM.asm
+
+kbdfix32:	DragonROM.asm
+	$(AS) $(ASFLAGS_KBDFIX) -oroms/dragon32_kbdfix.rom -llist/d32_kbdfix.lst DragonROM.asm
+
+kbdfix64_1:	DragonROM.asm
+	$(AS) $(ASFLAGS_KBDFIX) -DDragon64 -oroms/dragon64_1_kbdfix.rom -llist/d64_1_kbdfix.lst DragonROM.asm
 
 clean:
 	rm roms/*.rom
