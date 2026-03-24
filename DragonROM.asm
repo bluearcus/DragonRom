@@ -31,6 +31,13 @@
 ; 	Finished commenting the entire file.
 ;
 
+; 2026-03-23, Mike Miller
+;       Integrated and improved screen editor and replacement of EDIT command
+;       Code derived from original work by Rob Strange (published Your Computer magazine, July 1984), with additions by Gary Moulton (2024)
+;       Define ROM_SCREEN_EDITOR to enable, Dragon 32 and 64 compatible
+
+; 
+
 
         ifdef	Dragon64ram
 	ORG	$C000				; Dragon 64 ram mode
@@ -4473,22 +4480,17 @@ ScrEdUpArrow                            ; Skipped path which sets key to Up Arro
         
 ScrEdDisplay
         LDX     <TextVDUCursAddr        ; going to display a normal keyed character so get cursor pos
-        CMPX    #TextScreenLast         ; are we about to scroll
-        BNE     ScrEdDisplayExit        ; no, just exit leaving the key in A for the main input loop        
-        CLR     <ScrEdFlag		; prevent hook re-entry during scroll
-        JSR     >BasicScreenOut         ; do the output ourselves, including scroll
-        COM     <ScrEdFlag              ; reset the browse mode flag
-        LEAX    -31,X                   ; adjust edit cursor to start of bottom line
-        STX     <TextVDUCursAddr        ; and save it
-        LDX     <ScrEdBrowseCrsPos      ; check the old browse cursor position
-        CMPX    #TextScreenBase+32	; were we on the top line and copying something that's scrolled away
-        BCS     ScrEdLoop               ; if we were then hard cheese, leave browse cursor where it was
-        LEAX    -32,X                   ; otherwise, adjust it to follow the content it was copying
-        STX     <ScrEdBrowseCrsPos      ; and save it back
-IndScrEdLoop                            ; Indirection label so we can avoid later LBRx forms
-        BRA     ScrEdLoop               ; now go back to the browse mode main loop. Also trampoline
+        CMPX    #TextScreenLast         ; will LB5D0's TextOutChar trigger a scroll?
+        BNE     ScrEdDisplayExit        ; no, just exit leaving the key in A for the main input loop
+        LDX     <ScrEdBrowseCrsPos      ; yes: pre-adjust browse cursor before the scroll
+        CMPX    #TextScreenBase+32	; is it on the top line (will scroll off)?
+        BCS     ScrEdDisplayExit        ; yes: can't adjust, just let it go
+        LEAX    -32,X                   ; adjust browse cursor to follow its content after scroll
+        STX     <ScrEdBrowseCrsPos
 ScrEdDisplayExit
-        PULS    B,X,Y,PC                ; return (for the moment) to the main input loop with a key to print
+        PULS    B,X,Y,PC                ; return to LB5D0 which stores in buffer and outputs to screen
+IndScrEdLoop                            ; Indirection label so we can avoid later LBRx forms
+        BRA     ScrEdLoop
 
 ScrEdDispatch
         LDB     10,Y                    ; grab corresponding dispatch offset for matched key 
@@ -10926,6 +10928,31 @@ LBBEC   LEAS    -2,S			; Make room on stack
         CLR     PIA0DB			; Force all columns low
         LDB     PIA0DA			; Check for any key down 
         ORB     #$80			; Mask out joystick comparitor input
+	ifdef	ROM_KBD_ROLLOVER_FIX
+	ifndef	Dragon64ram
+; Rollover fix (D32 / D64 ROM): stock code exits without updating the rollover
+; table when a second PIA read (all columns high) isn't $FF, leaving the table
+; stale and causing lost/stuck keys.  Fix checks for any key down first, then
+; resyncs the table on idle-state changes.  NOP fill preserves ROM geometry.
+        CMPB    #$FF			; Any key down at all?
+        BNE     LBC08			; Yes - proceed to full column scan
+        CMPB    ,X			; No key down - has idle state changed from saved?
+        BEQ     LBC6F			; Same as saved - nothing happening, exit
+        FILL    $12,7			; NOP fill to preserve ROM geometry
+LBC08   STB     ,X+			; Save master byte in rollover table
+	else
+; Dragon64ram: stock handling (IRQ-based rollover reset at D64IRQ/LBF32)
+        CMPB    ,X			; Any row changed from last scan ?
+        BEQ     LBC6F			; No : restore and return
+        TFR     B,A			; Save row mask
+        COM     PIA0DB			; Reset all columns to high
+        BSR     LBBCD			; Scan the row
+        CMPB    #$FF			; Any keys down ?
+        BNE     LBC6F
+        STA     ,X+			; Put keyrown in rollover table
+	endc
+	else
+; Stock rollover handling
         CMPB    ,X			; Any row changed from last scan ?
         BEQ     LBC6F			; No : restore and return
 	
@@ -10937,6 +10964,7 @@ LBBEC   LEAS    -2,S			; Make room on stack
         BNE     LBC6F			
 	
         STA     ,X+			; Put keyrown in rollover table
+	endc
         CLR     ,S			; Zero column count
         LDB     #$FE			; Start scanning first column
         STB     PIA0DB			; Output column
