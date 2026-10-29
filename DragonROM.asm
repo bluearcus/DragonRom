@@ -4681,9 +4681,10 @@ L99E1   CMPA    #' '			; space pressed?
         FCB     Skip2			; skip 2 bytes
 	
 L99E6   LDB     #$F9			; max bytes in line buffer
-L99E8   LDA     ,X+			; get a character from buffer, advance
+L99E8   LDA     ,X			; get a character from buffer (X must exit on the terminator)
         BEQ     L99F4			; end of line ?, yep exit
         JSR     >TextOutChar 		; output the character
+        LEAX    1,X			; increment buffer pointer
         DECB				; decrement character counter (entered above)
         BNE     L99E8			; all done, if not loop again
 L99F4   RTS				; return, do another command
